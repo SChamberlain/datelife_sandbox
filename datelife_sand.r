@@ -25,17 +25,16 @@ registerDoMC(cores=4)
 #' @param source_ Source to match names to. One of ncbi, iPlant
 #' @param splitby Length of chunks by which to split species list
 #' @examples \dontrun{
-#' replacenames()
+#' replacenames(alfarotree, source_="NCBI", splitby=100)
 #' }
 replacenames <- function(phylo, source_ = "NCBI", splitby = 100){
 	tree_tips <- str_replace_all(phylo$tip.label, "_", " ") # replace underscores
 	registerDoMC(cores=4)
-	out <- ldply(slice(tree_tips, splitby), function(x) tnrs(x, getpost="POST")[,1:5], .parallel=TRUE) # get TNRS data
+	out <- ldply(slice(tree_tips, splitby), function(x) tnrs(x, getpost="POST")[,1:4], .parallel=TRUE) # get TNRS data
 	
 	temp <- out[out$sourceId %in% source_, ]
-	out$submittedName[!out$submittedName %in% temp$submittedName]
 	
-	foo2 <- function(x){ 
+	foo2 <- function(x){  # function to grab submitted name if matched or accepted if not
 		if(x$submittedName %in% x$acceptedName){
 			return(as.character(x$submittedName))
 		} else
@@ -45,18 +44,25 @@ replacenames <- function(phylo, source_ = "NCBI", splitby = 100){
 	} 
 	registerDoMC(4)
 	temp2 <- ddply(temp, .(submittedName), foo2, .parallel=TRUE)
-	order_ <- sapply(temp$sub, function(x) grep(x, temp2$submittedName))
-	temp3 <- temp2[order_,]
-	phylo$tip.label <- temp3
+	
+	nosourcematch <- unique(out$submittedName[!out$submittedName %in% temp$submittedName]) # no match to source
+	temp22 <- rbind(temp2, data.frame(submittedName=nosourcematch, V1=nosourcematch)) # add in species for which there was no match
+	
+	# replace spaces with underscores in both columns
+	temp22$submittedName <- str_replace_all(temp22$submittedName, " ", "_")
+	temp22$V1 <- str_replace_all(temp22$V1, " ", "_")
+	
+	notnrsmatch <- phylo$tip.label[!phylo$tip.label %in% as.character(temp22$submittedName)] # no match at all
+	temp33 <- rbind(temp22, data.frame(submittedName=notnrsmatch, V1=notnrsmatch)) # add notnrsmatches to data.frame
+	
+# 	order_ <- sapply(temp$sub, function(x) grep(x, temp22$submittedName))
+	
+	order_ <- sapply(phylo$tip.label, function(x) grep(x, as.character(temp33$submittedName)))
+	
+	temp3 <- temp33[order_,]
+	phylo$tip.label <- temp3$V1
 	return(phylo)
 }
-tomatch <- replacenames(out) # data.frame to match against input data.frame
-
-
-alfarotree_tips_orig <- alfarotree_tips
-
-alfarotree_tips_orig %in% alfarotree_tips
-
 
 # parallelize = machine has 4 cores - may be able to add more cores
 # How much will we be able to parallelize taxosaurus calls?
